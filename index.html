@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Minimal Tracker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- jsPDF libraries for PDF generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    </style>
+</head>
+<body class="bg-white text-black min-h-screen p-4 sm:p-12">
+
+    <div class="max-w-4xl mx-auto">
+        <!-- Header & Summary -->
+        <header class="mb-10">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 sm:gap-0 mb-8 border-b-2 border-black pb-4">
+                <h1 class="text-2xl sm:text-4xl font-bold tracking-tight uppercase">Ledger</h1>
+                <button onclick="downloadPDF()" class="w-full sm:w-auto text-sm sm:text-base bg-gray-200 hover:bg-gray-300 text-black px-4 py-3 sm:py-2 font-medium tracking-wide uppercase transition-colors">
+                    Download PDF
+                </button>
+            </div>
+            
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-6 text-left">
+                <div>
+                    <p class="text-xs sm:text-sm text-gray-500 uppercase tracking-wider mb-1 sm:mb-2">Credit</p>
+                    <p id="total-credit" class="text-xl sm:text-3xl font-semibold text-gray-800">₹0</p>
+                </div>
+                <div>
+                    <p class="text-xs sm:text-sm text-gray-500 uppercase tracking-wider mb-1 sm:mb-2">Debit</p>
+                    <p id="total-debit" class="text-xl sm:text-3xl font-semibold text-gray-800">₹0</p>
+                </div>
+                <div>
+                    <p class="text-xs sm:text-sm text-gray-500 uppercase tracking-wider mb-1 sm:mb-2">Useless</p>
+                    <p id="total-useless" class="text-xl sm:text-3xl font-semibold text-gray-500">₹0</p>
+                </div>
+                <div class="sm:text-right">
+                    <p class="text-xs sm:text-sm text-gray-500 uppercase tracking-wider mb-1 sm:mb-2">Balance</p>
+                    <p id="total-balance" class="text-xl sm:text-3xl font-bold">₹0</p>
+                </div>
+            </div>
+        </header>
+
+        <!-- Form -->
+        <form id="tracker-form" class="mb-12 space-y-4">
+            <div class="flex flex-col sm:flex-row gap-4">
+                <input type="date" id="t-date" required
+                    class="w-full sm:w-1/2 p-3 sm:p-4 border border-gray-300 text-base sm:text-lg focus:outline-none focus:border-black transition-colors rounded-none">
+                <select id="t-type" required
+                    class="w-full sm:w-1/2 p-3 sm:p-4 border border-gray-300 text-base sm:text-lg focus:outline-none focus:border-black transition-colors rounded-none bg-white">
+                    <option value="debit">Debit (-)</option>
+                    <option value="credit">Credit (+)</option>
+                </select>
+            </div>
+            
+            <div>
+                <input type="text" id="t-desc" placeholder="Description" required autocomplete="off"
+                    class="w-full p-3 sm:p-4 border border-gray-300 text-base sm:text-lg focus:outline-none focus:border-black transition-colors rounded-none">
+                <p class="text-xs sm:text-sm text-gray-400 mt-2 ml-1">Tip: Press <kbd class="font-mono bg-gray-100 px-2 py-0.5 rounded">Alt + F</kbd> to auto-fill (Useless)</p>
+            </div>
+            
+            <input type="number" id="t-amount" placeholder="Amount (₹)" step="0.01" min="0" required
+                class="w-full p-3 sm:p-4 border border-gray-300 text-base sm:text-lg focus:outline-none focus:border-black transition-colors rounded-none">
+            
+            <button type="submit" 
+                class="w-full bg-black text-white p-3 sm:p-4 text-base sm:text-lg font-medium tracking-wide uppercase hover:bg-gray-800 transition-colors">
+                Add Entry
+            </button>
+        </form>
+
+        <!-- Transaction List -->
+        <div>
+            <h2 class="text-sm sm:text-base text-gray-500 uppercase tracking-wider mb-4 border-b border-gray-200 pb-3">Transactions</h2>
+            <div id="tx-list" class="space-y-4">
+                <!-- Items injected here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // State
+        let transactions = JSON.parse(localStorage.getItem('minimal_tracker_data')) || [];
+
+        // DOM Elements
+        const form = document.getElementById('tracker-form');
+        const listEl = document.getElementById('tx-list');
+        const sumCreditEl = document.getElementById('total-credit');
+        const sumDebitEl = document.getElementById('total-debit');
+        const sumUselessEl = document.getElementById('total-useless');
+        const sumBalanceEl = document.getElementById('total-balance');
+        const descInput = document.getElementById('t-desc');
+
+        // Init
+        document.getElementById('t-date').valueAsDate = new Date();
+        render();
+
+        // Keyboard Shortcut for (Useless)
+        descInput.addEventListener('keydown', function(e) {
+            if (e.altKey && e.key.toLowerCase() === 'f') {
+                e.preventDefault(); // Prevent default browser behavior
+                const currentVal = this.value.trim();
+                this.value = currentVal ? currentVal + ' (Useless)' : '(Useless)';
+            }
+        });
+
+        // Add Transaction
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const tx = {
+                id: Date.now().toString(),
+                date: document.getElementById('t-date').value,
+                type: document.getElementById('t-type').value,
+                desc: descInput.value.trim(),
+                amount: parseFloat(document.getElementById('t-amount').value) || 0
+            };
+
+            transactions.push(tx);
+            transactions.sort((a, b) => new Date(b.date) - new Date(a.date)); // Newest first
+            
+            saveData();
+            render();
+            
+            // Reset form fields except date
+            descInput.value = '';
+            document.getElementById('t-amount').value = '';
+            
+            // Auto-focus back to description box for continuous entry
+            descInput.focus();
+        });
+
+        // Delete Transaction
+        window.deleteTx = function(id) {
+            transactions = transactions.filter(t => t.id !== id);
+            saveData();
+            render();
+        }
+
+        // Save
+        function saveData() {
+            localStorage.setItem('minimal_tracker_data', JSON.stringify(transactions));
+        }
+
+        // Format Currency
+        function fmt(amount) {
+            return '₹' + amount.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+        }
+
+        // Render
+        function render() {
+            listEl.innerHTML = '';
+            let tCredit = 0, tDebit = 0, tUseless = 0;
+
+            if (transactions.length === 0) {
+                listEl.innerHTML = '<p class="text-base text-gray-400 italic">No transactions yet.</p>';
+            } else {
+                transactions.forEach(tx => {
+                    if (tx.type === 'credit') {
+                        tCredit += tx.amount;
+                    } else {
+                        tDebit += tx.amount;
+                        // Check for (Useless) in description (case-insensitive)
+                        if (tx.desc.toUpperCase().includes('(USELESS)')) {
+                            tUseless += tx.amount;
+                        }
+                    }
+
+                    const isCredit = tx.type === 'credit';
+                    const sign = isCredit ? '+' : '-';
+                    
+                    const div = document.createElement('div');
+                    div.className = 'group flex flex-col sm:flex-row justify-between items-start sm:items-center text-base sm:text-lg border-b border-gray-100 pb-4 pt-2 gap-2 sm:gap-0';
+                    
+                    // Highlight Useless expenses slightly
+                    const isUselessDesc = tx.desc.toUpperCase().includes('(USELESS)');
+                    const descClass = isUselessDesc ? 'font-medium text-red-700' : 'font-medium text-gray-900';
+
+                    div.innerHTML = `
+                        <div class="flex-1 pr-4">
+                            <p class="${descClass} break-words">${tx.desc}</p>
+                            <p class="text-sm text-gray-500 mt-1">${new Date(tx.date).toLocaleDateString('en-IN')}</p>
+                        </div>
+                        <div class="w-full sm:w-auto text-left sm:text-right flex items-center justify-between sm:justify-end gap-4">
+                            <span class="${isCredit ? 'text-gray-900 font-bold' : 'text-gray-600'}">
+                                ${sign}${fmt(tx.amount)}
+                            </span>
+                            <button onclick="deleteTx('${tx.id}')" class="text-red-400 sm:text-gray-300 hover:text-red-500 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity p-2 text-xl sm:text-base" title="Delete">✕</button>
+                        </div>
+                    `;
+                    listEl.appendChild(div);
+                });
+            }
+
+            // Update Summary
+            const balance = tCredit - tDebit;
+            
+            sumCreditEl.textContent = fmt(tCredit);
+            sumDebitEl.textContent = fmt(tDebit);
+            sumUselessEl.textContent = fmt(tUseless);
+            sumBalanceEl.textContent = fmt(balance);
+            
+            // Visual indicator for negative balance
+            sumBalanceEl.className = `text-xl sm:text-3xl font-bold ${balance < 0 ? 'text-gray-500' : 'text-black'}`;
+        }
+
+        // Generate PDF
+        window.downloadPDF = function() {
+            if (transactions.length === 0) return;
+
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+            
+            doc.setFontSize(18);
+            doc.text('Expense Ledger Report', 14, 22);
+            
+            const tableData = transactions.map(tx => [
+                new Date(tx.date).toLocaleDateString('en-IN'),
+                tx.desc,
+                tx.type.charAt(0).toUpperCase() + tx.type.slice(1),
+                fmt(tx.amount)
+            ]);
+            
+            doc.autoTable({
+                startY: 30,
+                head: [['Date', 'Description', 'Type', 'Amount']],
+                body: tableData,
+                theme: 'grid',
+                headStyles: { fillColor: [40, 40, 40] }
+            });
+            
+            const finalY = doc.lastAutoTable.finalY || 30;
+            doc.setFontSize(11);
+            doc.text(`Total Credit: ${sumCreditEl.textContent}`, 14, finalY + 10);
+            doc.text(`Total Debit: ${sumDebitEl.textContent}`, 14, finalY + 18);
+            doc.text(`Total Useless Expenses: ${sumUselessEl.textContent}`, 14, finalY + 26);
+            doc.text(`Final Balance: ${sumBalanceEl.textContent}`, 14, finalY + 34);
+            
+            doc.save(`Ledger_Report_${new Date().toLocaleDateString('en-IN').replace(/\//g, '-')}.pdf`);
+        }
+    </script>
+</body>
+</html>
